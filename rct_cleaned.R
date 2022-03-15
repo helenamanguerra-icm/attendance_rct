@@ -190,3 +190,127 @@ summary(mod1e)
 mod1f <- glmer(data = model_data[first_session == TRUE], attended_0_1 ~ Treatment1 + Treatment2 + as.factor(week) + (1|base_name/branch_name), family = "binomial") 
 # boundary (singular) fit: see help('isSingular')
 summary(mod1f)
+
+
+
+# ------- Mirror IPA analysis
+
+ipa_orig <- model_data[, .(attended = sum(attended_0_1), total = .N), by = .(base_name, branch_name, treatment, Treatment1, Treatment2, Control, week, sys_community_id)]
+ipa_orig[, prop := attended / total]
+
+ggplot(ipa_orig) + 
+  geom_boxplot(aes(x = treatment, y = prop, color = treatment),  lwd=1, outlier.alpha = 0) + 
+  geom_jitter(aes(x = treatment, y = prop)) + 
+  facet_wrap(~ week, nrow = 2) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggplot(ipa_orig) + 
+  geom_boxplot(aes(x = treatment, y = prop, color = treatment), lwd=2, outlier.alpha = 0) + 
+  geom_jitter(aes(x = treatment, y = prop), alpha = 0.5) +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+
+mod2a <- lm(data = ipa_orig, prop ~ Treatment1 + Treatment2) 
+summary(mod2a)
+
+
+ipa_first_session <- model_data[first_session == TRUE, .(attended = sum(attended_0_1), total = .N), by = .(base_name, branch_name, treatment, Treatment1, Treatment2, Control, week, sys_community_id)]
+ipa_first_session[, prop := attended / total]
+
+ggplot(ipa_first_session) + 
+  geom_boxplot(aes(x = treatment, y = prop, color = treatment),  lwd=1, outlier.alpha = 0) + 
+  geom_jitter(aes(x = treatment, y = prop)) + 
+  facet_wrap(~ week, nrow = 2) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+ggplot(ipa_first_session) + 
+  geom_boxplot(aes(x = treatment, y = prop, color = treatment), lwd=2, outlier.alpha = 0) + 
+  geom_jitter(aes(x = treatment, y = prop), alpha = 0.5) +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+mod2b <- lm(data = ipa_first_session, prop ~ Treatment1 + Treatment2) 
+summary(mod2b)
+
+
+# ------- Retention 
+
+ggplot(model_data[week == 1]) + 
+  geom_bar(aes(x = "", fill = is_dropout), color = "black", position = position_stack()) +
+  facet_wrap(~treatment) + 
+  theme_bw()
+
+ggplot(model_data[week == 1]) + 
+  geom_bar(aes(x = "", fill = is_dropout), color = "black", position = position_stack()) +
+  facet_wrap(~treatment, scales = "free") + 
+  theme_bw()
+
+
+mod3a <- glm(data = model_data[week == 1], is_dropout ~ Treatment1 + Treatment2, family = "binomial") 
+summary(mod3a)
+
+mod3b <- glmer(data = model_data[week == 1], is_dropout ~ Treatment1 + Treatment2 + (1|base_name/branch_name), family = "binomial") 
+summary(mod3b)
+
+# mod3c <- glmer(data = model_data[], attended_0_1 ~ Treatment1 + Treatment2 + as.factor(week) + (1|base_name/branch_name), family = "binomial") 
+# # boundary (singular) fit: see help('isSingular')
+# summary(mod3c)
+
+
+model_data[, dropped_out_by_this_week := dropped_out_starting_week]
+
+
+ggplot(model_data) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(~treatment) + 
+  theme_bw()
+
+ggplot(model_data) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(~treatment, scales = "free") + 
+  theme_bw()
+
+mod5a <- glm(data = model_data[], dropped_out_by_this_week ~ week + Treatment1 + Treatment2, family = "binomial") 
+summary(mod5a)
+
+mod5a <- glm(data = model_data, dropped_out_by_this_week ~ week + treatment, family = "binomial") 
+summary(mod5a)
+
+# ------- Orig 1st session
+
+ggplot(model_data[week == 1 & first_session  == T]) + 
+  geom_bar(aes(x = "", fill = is_dropout), color = "black", position = position_stack()) +
+  facet_wrap(~treatment) + 
+  theme_bw()
+
+ggplot(model_data[week == 1 & first_session == T]) + 
+  geom_bar(aes(x = "", fill = is_dropout), color = "black", position = position_stack()) +
+  facet_wrap(~treatment, scales = "free") + 
+  theme_bw()
+
+mod4a <- glm(data = model_data[week == 1 & first_session  == T], is_dropout ~ Treatment1 + Treatment2, family = "binomial") 
+summary(mod4a)
+
+mod4b <- glmer(data = model_data[week == 1 & first_session  == T], is_dropout ~ Treatment1 + Treatment2 + (1|base_name/branch_name), family = "binomial") 
+summary(mod4b)
+
+model_data[, dropped_out_by_this_week := dropped_out_starting_week]
+
+
+ggplot(model_data[first_session == T & week > 1]) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(~treatment) + 
+  theme_bw()
+
+
+
+ggplot(model_data[first_session == T & week %in% 2:8]) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(~treatment, scales = "free") + 
+  theme_bw()
+
