@@ -16,6 +16,7 @@ library(ggplot2)
 library(lme4)
 library(geepack)
 library(lmtest)
+library(lmerTest)
 library(sandwich)
 
 # Print out probability of control, treatment1, treatment2
@@ -243,6 +244,34 @@ mod1b <- glmer(data = model_data, attended_0_1 ~ Treatment1 + Treatment2 + (1|ba
 summary(mod1b)
 
 get_probability_from_logodds(mod1b)
+
+# Use linear regression with binary outcome applying random effects (IPA suggestion)
+mod1b_linear <- lmer(data = model_data, attended_0_1 ~ Treatment1 + Treatment2 + (1|base_name/branch_name)) 
+summary(mod1b_linear)
+anova(mod1b_linear)
+
+# Analysis of Variance Table
+# npar Sum Sq Mean Sq F value
+# Treatment1    1 14.039  14.039  59.878
+# Treatment2    1 54.935  54.935 234.305
+
+# Treatment1 significance
+pf(q = 59.878, 
+   df1 = model_data[treatment %like% "V1",.N] - 1, # sample size of treatment1 - 1
+   df2 = model_data[treatment == "Control",.N] - 1, # sample size of control - 1
+   lower.tail = FALSE)
+
+# p-value less than 0.5 - Significant
+
+# Treatment 2 significance
+pf(q = 234.305, 
+   df1 = model_data[treatment %like% "V1",.N] - 1, # sample size of treatment1 - 1
+   df2 = model_data[treatment == "Control",.N] - 1, # sample size of control - 1
+   lower.tail = FALSE)
+
+# p-value less than 0.5 - Significant
+
+get_probability_from_logodds(mod1b_linear)
 
 # Estimate Std. Error    z value     Pr(>|z|)
 # (Intercept)    -0.07087499 0.10452359 -0.6780765 4.977232e-01
