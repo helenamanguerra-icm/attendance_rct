@@ -50,28 +50,6 @@ get_probability_from_logodds <- function(modelobj, model_type = "glmer"){
   treatment1_prob <- round(exp(intercept + treatment1_coef) / (1 + exp(intercept + treatment1_coef)), 2)
   treatment2_prob <- round(exp(intercept + treatment2_coef) / (1 + exp(intercept + treatment2_coef)), 2)
 
-  # # Bootstrap, using 1000 draws, carrying over uncertainty from intercept + treatment  
-  # probs <- lapply(1:1000, function(i){
-  #   
-  #   intercept_draw <- rnorm(n = 1, mean = intercept, sd = intercept_se)
-  #   treatment1_draw <- rnorm(n = 1, mean = treatment1_coef, sd = treatment1_coef_se)
-  #   treatment2_draw <- rnorm(n = 1, mean = treatment2_coef, sd = treatment2_coef_se)
-  # 
-  #   control_prob <- round(exp(intercept_draw) / (1 + exp(intercept_draw)), 2)
-  #   treatment1_prob <- round(exp(intercept_draw + treatment1_draw) / (1 + exp(intercept_draw + treatment1_draw)), 2)
-  #   treatment2_prob <- round(exp(intercept_draw + treatment2_draw) / (1 + exp(intercept_draw + treatment2_draw)), 2)
-  #   
-  #   return(    
-  #   data.table(control_prob = control_prob, 
-  #              treatment1_prob = treatment1_prob, 
-  #              treatment2_prob = treatment2_prob))
-  #   
-  # }) %>% rbindlist(use.names = F)
-  #   
-  # probs[, quantile(control_prob, c(0.025, 0.5, 0.975))]
-  # probs[, quantile(treatment1_prob, c(0.025, 0.5, 0.975))]
-  # probs[, quantile(treatment2_prob, c(0.025, 0.5, 0.975))]
-  
   message("results")
   message("---")
   print(paste("Control Probability:", control_prob))
@@ -88,8 +66,8 @@ get_probability_from_logodds <- function(modelobj, model_type = "glmer"){
 # ------- Data cleaning
 
 # deleted for github
-domo_id = "a9be407f-02b5-4c6c-a767-9875a37c1ab1"
-secret_id = '5903c7704fc5a8604dba4b7d6077e39529725ba9d98b6603097fe8242b868ca3'
+domo_id = ""
+secret_id = ''
 domo <- rdomo::Domo(client_id=domo_id, secret=secret_id)
 
 
