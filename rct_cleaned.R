@@ -14,26 +14,93 @@ library(data.table)
 library(magrittr)
 library(ggplot2)
 library(lme4)
+library(geepack)
+library(lmtest)
+library(sandwich)
+
+# Print out probability of control, treatment1, treatment2
+get_probability_from_logodds <- function(modelobj, model_type = "glmer"){
+  
+  if(model_type == "glmer"){
+    print(summary(modelobj)[[10]])
+    
+    intercept <- summary(modelobj)[[10]][1, 1]
+    treatment1_coef <- summary(modelobj)[[10]][2, 1]
+    treatment2_coef <- summary(modelobj)[[10]][3, 1]
+    
+    intercept_se <- summary(modelobj)[[10]][1, 2]
+    treatment1_coef_se <- summary(modelobj)[[10]][2, 2]
+    treatment2_coef_se <- summary(modelobj)[[10]][3, 2]
+  } else{
+    
+    print(summary(modelobj)[[12]])
+    
+    intercept <- summary(modelobj)[[12]][1, 1]
+    treatment1_coef <- summary(modelobj)[[12]][2, 1]
+    treatment2_coef <- summary(modelobj)[[12]][3, 1]
+    
+    intercept_se <- summary(modelobj)[[12]][1, 2]
+    treatment1_coef_se <- summary(modelobj)[[12]][2, 2]
+    treatment2_coef_se <- summary(modelobj)[[12]][3, 2]
+  }
+  
+  
+  
+  control_prob <- round(exp(intercept) / (1 + exp(intercept)), 2)
+  treatment1_prob <- round(exp(intercept + treatment1_coef) / (1 + exp(intercept + treatment1_coef)), 2)
+  treatment2_prob <- round(exp(intercept + treatment2_coef) / (1 + exp(intercept + treatment2_coef)), 2)
+
+  # # Bootstrap, using 1000 draws, carrying over uncertainty from intercept + treatment  
+  # probs <- lapply(1:1000, function(i){
+  #   
+  #   intercept_draw <- rnorm(n = 1, mean = intercept, sd = intercept_se)
+  #   treatment1_draw <- rnorm(n = 1, mean = treatment1_coef, sd = treatment1_coef_se)
+  #   treatment2_draw <- rnorm(n = 1, mean = treatment2_coef, sd = treatment2_coef_se)
+  # 
+  #   control_prob <- round(exp(intercept_draw) / (1 + exp(intercept_draw)), 2)
+  #   treatment1_prob <- round(exp(intercept_draw + treatment1_draw) / (1 + exp(intercept_draw + treatment1_draw)), 2)
+  #   treatment2_prob <- round(exp(intercept_draw + treatment2_draw) / (1 + exp(intercept_draw + treatment2_draw)), 2)
+  #   
+  #   return(    
+  #   data.table(control_prob = control_prob, 
+  #              treatment1_prob = treatment1_prob, 
+  #              treatment2_prob = treatment2_prob))
+  #   
+  # }) %>% rbindlist(use.names = F)
+  #   
+  # probs[, quantile(control_prob, c(0.025, 0.5, 0.975))]
+  # probs[, quantile(treatment1_prob, c(0.025, 0.5, 0.975))]
+  # probs[, quantile(treatment2_prob, c(0.025, 0.5, 0.975))]
+  
+  message("results")
+  message("---")
+  print(paste("Control Probability:", control_prob))
+  print(paste("Treatment 1 Probability: ", treatment1_prob))
+  print(paste("Treatment 1 Probability Abs Diff: ", round(treatment1_prob - control_prob,2)))
+  print(paste("Treatment 1 Probability Relative Diff: ", round((treatment1_prob - control_prob) / control_prob, 2)))
+  
+  print(paste("Treatment 2 Probability: ", treatment2_prob))
+  print(paste("Treatment 2 Probability Abs Diff: ", round(treatment2_prob - control_prob, 2)))
+  print(paste("Treatment 2 Probability Relative Diff: ", round((treatment2_prob - control_prob) / control_prob, 2)))
+  
+}
 
 # ------- Data cleaning
 
 # deleted for github
-domo_id = "XXX"
-secret_id = 'XXX'
+domo_id = "a9be407f-02b5-4c6c-a767-9875a37c1ab1"
+secret_id = '5903c7704fc5a8604dba4b7d6077e39529725ba9d98b6603097fe8242b868ca3'
+domo <- rdomo::Domo(client_id=domo_id, secret=secret_id)
 
-domo <- rdomo::Domo(client_id=domo_id,
-                    secret=secret_id)
-
-write.csv(data, "G:/.shortcut-targets-by-id/0BwSiMwXYbhP-LUE0eW54TXl4RlE/ICM Research/1. Ongoing Projects/2021 GIF Attendance RCT B4/Attendance Analysis/rct_analysis_data.csv", row.names = F)
 
 data <- domo$ds_get("48a6bb9f-0518-4690-a25e-32c8536745e8")
 data <- data.table(data)
 
-# No bacolod? 
 data <- data[is.na(`Community Canceled`)]
 
 # Mark participants who attended at least 1 week 
 data[week1 == 1, first_session := TRUE]
+data[week1 == 0, first_session := FALSE]
 
 #data <- data[part_type=="original"]
 
@@ -89,6 +156,8 @@ data_long <- merge(data_long, dropout_week, all.x=T)
 data_long[week > dropout_week, dropped_out_starting_week := TRUE]
 data_long[is.na(dropout_week) | week <= dropout_week, dropped_out_starting_week := FALSE]
 
+data_long[, dropped_out_by_this_week := dropped_out_starting_week]
+
 # Identify dropouts
 data_long[!is.na(dropout_week), is_dropout := TRUE]
 data_long[is.na(is_dropout), is_dropout := FALSE]
@@ -99,7 +168,26 @@ non_starter_participants <- unique(data_long[dropout_week == 0, sys_participant_
 data_long[sys_participant_id %in% non_starter_participants, non_starter := TRUE]
 data_long[!sys_participant_id %in% non_starter_participants, non_starter := FALSE]
 
+# Create clustering variable 
+data_long[, clusterid := paste0(base_name, "_", branch_name)]
+data_long[, clusterid := as.numeric(as.factor(clusterid))]
+data_long <- data_long[order(base_name, branch_name, week)]
+
 model_data <- data_long[comm_ended_early == FALSE  & part_type == "original" & part_isvisitor == FALSE]
+
+model_data[week %in% 1:8, program_half := "First half"]
+model_data[week %in% 9:15, program_half := "Second half"]
+
+model_data[dropout_week %in% 1:8, dropped_out_half := "First half"]
+model_data[dropout_week %in% 9:15, dropped_out_half := "Second half"]
+
+first_half_droppout <- unique(model_data[dropped_out_half %like% "First", sys_participant_id])
+second_half_droppout <- unique(model_data[dropped_out_half %like% "Second", sys_participant_id])
+
+model_data[, dropped_out_half_1 := ifelse(sys_participant_id %in% first_half_droppout, 1, 0)]
+model_data[, dropped_out_half_2 := ifelse(sys_participant_id %in% second_half_droppout, 1, 0)]
+
+
 
 # ------- QUESTION 0: Do we have the correct population? 
 
@@ -165,27 +253,78 @@ ggplot(model_data) +
   ggtitle("Attendance by week")
 
 
-# ------- 
 
+# ------- Overall attendance
 
+# Underspecified 
 mod1a <- glm(data = model_data, attended_0_1 ~ Treatment1 + Treatment2, family = "binomial") 
 summary(mod1a)
 
+# Specifying correlation structure
 mod1b <- glmer(data = model_data, attended_0_1 ~ Treatment1 + Treatment2 + (1|base_name/branch_name), family = "binomial") 
 summary(mod1b)
 
+get_probability_from_logodds(mod1b)
+
+# Estimate Std. Error    z value     Pr(>|z|)
+# (Intercept)    -0.07087499 0.10452359 -0.6780765 4.977232e-01
+# Treatment1TRUE  0.21728712 0.01509758 14.3921862 5.793521e-47
+# Treatment2TRUE  0.23232265 0.01520848 15.2758666 1.107459e-52
+# results
+# ---
+#   [1] "Control Probability: 0.48"
+# [1] "Treatment 1 Probability:  0.54"
+# [1] "Treatment 1 Probability Abs Diff:  0.06"
+# [1] "Treatment 1 Probability Relative Diff:  0.13"
+# [1] "Treatment 2 Probability:  0.54"
+# [1] "Treatment 2 Probability Abs Diff:  0.06"
+# [1] "Treatment 2 Probability Relative Diff:  0.13"
+
+# Overspecified model 
 mod1c <- glmer(data = model_data, attended_0_1 ~ Treatment1 + Treatment2 + as.factor(week) + (1|base_name/branch_name)  , family = "binomial") 
 summary(mod1c)
+# boundary (singular) fit: see help('isSingular') --> Marker of overspecification 
 
-# boundary (singular) fit: see help('isSingular')
 
-# ------- First session attendees only 
+# Did not implement, too slow
+
+# GEE model
+# Generalized estimating equations
+# Pros: 
+# GEEs estimate more efficient and unbiased regression parameters relative to ordinary least squares regression by specification of a working correlation matrix that accounts
+# for the form of within-subject correlation of responses
+# unbiased estimation of population-averaged regression coefficients despite possible misspecification of the correlation structure
+# Gives robust standard errors
+# Cons: 
+# Use to get population-average interpretation of model results, cannot get individual-level interpretation
+# no fit statistics 
+# slow!
+
+# Correlation types to select from 
+# Independent (no correlation structure)
+# Exchangable (same correlation bteween pairs of variables)
+# Autoregressive (more correlation between time points)
+
+
+# mod1b.geepack <- geeglm(data = model_data,
+#                        id = clusterid,
+#                        formula = attended_0_1 ~ Treatment1 + Treatment2,
+#                        family = "binomial", 
+#                        corstr = "exchangable",
+#                        waves = week)
+# 
+
+
+
+# ------- Overall attendance (first session attendees only) 
 
 mod1d <- glm(data = model_data[first_session == TRUE], attended_0_1 ~ Treatment1 + Treatment2, family = "binomial") 
 summary(mod1d)
 
 mod1e <- glmer(data = model_data[first_session == TRUE], attended_0_1 ~ Treatment1 + Treatment2 + (1|base_name/branch_name), family = "binomial") 
 summary(mod1e)
+
+get_probability_from_logodds(mod1e)
 
 mod1f <- glmer(data = model_data[first_session == TRUE], attended_0_1 ~ Treatment1 + Treatment2 + as.factor(week) + (1|base_name/branch_name), family = "binomial") 
 # boundary (singular) fit: see help('isSingular')
@@ -212,10 +351,9 @@ ggplot(ipa_orig) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
 
-
+# IPA analysis, but aggregated across weeks 
 mod2a <- lm(data = ipa_orig, prop ~ Treatment1 + Treatment2) 
 summary(mod2a)
-
 
 ipa_first_session <- model_data[first_session == TRUE, .(attended = sum(attended_0_1), total = .N), by = .(base_name, branch_name, treatment, Treatment1, Treatment2, Control, week, sys_community_id)]
 ipa_first_session[, prop := attended / total]
@@ -227,15 +365,32 @@ ggplot(ipa_first_session) +
   theme_bw() + 
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-
 ggplot(ipa_first_session) + 
   geom_boxplot(aes(x = treatment, y = prop, color = treatment), lwd=2, outlier.alpha = 0) + 
   geom_jitter(aes(x = treatment, y = prop), alpha = 0.5) +
   theme_bw() + 
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
+# IPA analysis, but aggregated across weeks, with first session only attendees
 mod2b <- lm(data = ipa_first_session, prop ~ Treatment1 + Treatment2) 
 summary(mod2b)
+
+# IPA analyses stratified by week
+mod.2c.list <- lapply(1:15, function(i){
+  mod.i <- lm(data = ipa_orig[week == i ], prop ~  Treatment1 + Treatment2) 
+  return(mod.i)
+})
+
+lapply(mod.2c.list, summary)
+
+
+# alternatively, IPA analysis as an interaction 
+mod2c <- lm(data = ipa_orig, prop ~  interaction(treatment, week)) 
+summary(mod2c)
+
+# IPA analysis with beta on week  
+mod2d <- lm(data = ipa_orig, prop ~ as.factor(week) + Treatment1 + Treatment2) 
+summary(mod2d)
 
 
 # ------- Retention 
@@ -257,29 +412,13 @@ summary(mod3a)
 mod3b <- glmer(data = model_data[week == 1], is_dropout ~ Treatment1 + Treatment2 + (1|base_name/branch_name), family = "binomial") 
 summary(mod3b)
 
-# mod3c <- glmer(data = model_data[], attended_0_1 ~ Treatment1 + Treatment2 + as.factor(week) + (1|base_name/branch_name), family = "binomial") 
-# # boundary (singular) fit: see help('isSingular')
-# summary(mod3c)
+get_probability_from_logodds(mod3b)
+
+mod3c <- glmer(data = model_data[], attended_0_1 ~ Treatment1 + Treatment2 + as.factor(week) + (1|base_name/branch_name), family = "binomial")
+# boundary (singular) fit: see help('isSingular')
+summary(mod3c)
 
 
-model_data[, dropped_out_by_this_week := dropped_out_starting_week]
-
-
-ggplot(model_data) + 
-  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
-  facet_wrap(~treatment) + 
-  theme_bw()
-
-ggplot(model_data) + 
-  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
-  facet_wrap(~treatment, scales = "free") + 
-  theme_bw()
-
-mod5a <- glm(data = model_data[], dropped_out_by_this_week ~ week + Treatment1 + Treatment2, family = "binomial") 
-summary(mod5a)
-
-mod5a <- glm(data = model_data, dropped_out_by_this_week ~ week + treatment, family = "binomial") 
-summary(mod5a)
 
 # ------- Orig 1st session
 
@@ -299,18 +438,101 @@ summary(mod4a)
 mod4b <- glmer(data = model_data[week == 1 & first_session  == T], is_dropout ~ Treatment1 + Treatment2 + (1|base_name/branch_name), family = "binomial") 
 summary(mod4b)
 
-model_data[, dropped_out_by_this_week := dropped_out_starting_week]
+get_probability_from_logodds(mod4b)
 
 
-ggplot(model_data[first_session == T & week > 1]) + 
+# ------- drop out week 
+
+ggplot(model_data) + 
   geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
   facet_wrap(~treatment) + 
   theme_bw()
 
-
-
-ggplot(model_data[first_session == T & week %in% 2:8]) + 
+ggplot(model_data) + 
   geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
   facet_wrap(~treatment, scales = "free") + 
   theme_bw()
 
+mod5a <- glm(data = model_data[], dropped_out_by_this_week ~ week + Treatment1 + Treatment2, family = "binomial") 
+summary(mod5a)
+
+
+# ------- Non starters
+
+ggplot(model_data[week == 1 & first_session  == F]) + 
+  geom_bar(aes(x = "", fill = is_dropout), color = "black", position = position_stack()) +
+  facet_wrap(~treatment) + 
+  theme_bw()
+
+ggplot(model_data[week == 1 & first_session == F]) + 
+  geom_bar(aes(x = "", fill = is_dropout), color = "black", position = position_stack()) +
+  facet_wrap(~treatment, scales = "free") + 
+  theme_bw()
+
+mod6a <- glm(data = model_data[week == 1 & first_session  == F], is_dropout ~ Treatment1 + Treatment2, family = "binomial") 
+summary(mod6a)
+
+mod6b <- glmer(data = model_data[week == 1 & first_session  == F], is_dropout ~ Treatment1 + Treatment2 + (1|base_name/branch_name), family = "binomial") 
+summary(mod6b)
+
+ggplot(model_data[first_session == F]) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(~treatment) + 
+  theme_bw()
+
+ggplot(model_data[first_session == F]) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(~treatment, scales = "free") + 
+  theme_bw()
+
+first_week_dropouts <- model_data[week == 1 & dropped_out_by_this_week == T, sys_participant_id]
+
+ggplot(model_data[!sys_participant_id %in% first_week_dropouts]) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(~treatment, scales = "free") + 
+  theme_bw()
+
+
+mod7a <- glm(data = model_data[!sys_participant_id %in% first_week_dropouts & week == 1], is_dropout ~ Treatment1 + Treatment2, family = "binomial") 
+summary(mod7a)
+
+
+
+mod7b <- glmer(data = model_data[!sys_participant_id %in% first_week_dropouts & week == 1], is_dropout ~ Treatment1 + Treatment2 + (1|base_name/branch_name), family = "binomial") 
+summary(mod7b)
+
+
+# -------
+
+ggplot(model_data[]) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(program_half~treatment, scales = "free") + 
+  theme_bw()
+
+ggplot(model_data[first_session == T]) + 
+  geom_bar(aes(x = as.factor(week), fill = dropped_out_by_this_week), color = "black", position = position_stack()) +
+  facet_wrap(program_half~treatment, scales = "free") + 
+  theme_bw()
+
+mod8a <- glm(data = model_data[week == 1], dropped_out_half_1 ~ Treatment1 + Treatment2, family = "binomial") 
+summary(mod8a)
+# boundary (singular) fit: see help('isSingular') with base/branch, so remove
+
+get_probability_from_logodds(mod8a, model_type = "glm")
+
+mod8b <- glm(data = model_data[week == 1], dropped_out_half_2 ~ Treatment1 + Treatment2, family = "binomial") 
+summary(mod8b)
+
+get_probability_from_logodds(mod8b, model_type = "glm")
+
+
+mod9a <- glm(data = model_data[week == 1 & first_session == T], dropped_out_half_1 ~ Treatment1 + Treatment2, family = "binomial") 
+summary(mod9a)
+# boundary (singular) fit: see help('isSingular') with base/branch, so remove
+
+get_probability_from_logodds(mod9a, model_type = "glm")
+
+mod9b <- glm(data = model_data[week == 1 & first_session == T], dropped_out_half_2 ~ Treatment1 + Treatment2, family = "binomial") 
+summary(mod9b)
+
+get_probability_from_logodds(mod9b, model_type = "glm")
